@@ -23,7 +23,7 @@ export default function ProfilePage() {
         locations: prefsData.locations || [],
       });
     }).finally(() => setLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   const togglePref = (field, value) => {
     setPrefs(prev => {

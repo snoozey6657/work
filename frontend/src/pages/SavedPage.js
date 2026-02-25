@@ -31,7 +31,7 @@ export default function SavedPage() {
       .then(r => r.json())
       .then(data => setLeads(Array.isArray(data) ? data : []))
       .finally(() => setLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   const handleStatusChange = async (projectId, newStatus) => {
     setLeads(prev => prev.map(l => l.id === projectId ? { ...l, save_status: newStatus } : l));

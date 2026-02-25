@@ -77,7 +77,7 @@ export default function DetailPage() {
       const el = document.getElementById('project-jsonld');
       if (el) el.remove();
     };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id]); // eslint-disable-line
 
   // Check if already saved
   const checkSaved = useCallback(async () => {
@@ -88,7 +88,7 @@ export default function DetailPage() {
       const match = leads.find(l => l.id === parseInt(id));
       if (match) setSaveStatus(match.save_status);
     } catch {}
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id]); // eslint-disable-line
 
   useEffect(() => { checkSaved(); }, [checkSaved]);
 

@@ -30,7 +30,7 @@ export default function useProjects() {
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
 
-  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]); // eslint-disable-line
 
   return { projects, pagination, loading, error };
 }

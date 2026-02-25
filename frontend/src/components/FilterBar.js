@@ -17,7 +17,7 @@ export default function FilterBar() {
       .then(r => r.json())
       .then(setMeta)
       .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   function apply(updated) {
     const next = { ...filters, ...updated };

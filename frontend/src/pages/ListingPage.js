@@ -23,7 +23,7 @@ export default function ListingPage() {
       const leads = await res.json();
       setSavedIds(new Set(leads.map(l => l.id)));
     } catch {}
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   useEffect(() => { fetchSaved(); }, [fetchSaved]);
 
