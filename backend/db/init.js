@@ -87,6 +87,40 @@ async function initDb() {
       );
     `);
 
+    // Password reset tokens
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id         SERIAL PRIMARY KEY,
+        user_id    INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token      TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_prt_token ON password_reset_tokens(token);
+    `);
+
+    // Fix source URLs — drop UNIQUE constraint then point to real government pages
+    await pool.query(`
+      ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_source_url_key;
+    `);
+    await pool.query(`
+      UPDATE projects SET source_url = CASE
+        WHEN source_url LIKE '%rockfordil.gov%'       THEN 'https://www.rockfordil.gov/Bids.aspx'
+        WHEN source_url LIKE '%rockfordparkdistrict%' THEN 'https://www.rockfordparkdistrict.org/contracts'
+        WHEN source_url LIKE '%rps205%'               THEN 'https://www.rps205.net/purchasing'
+        WHEN source_url LIKE '%wincoil%'              THEN 'https://www.wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps'
+        WHEN source_url LIKE '%wincoilhwy%'           THEN 'https://www.wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps'
+        WHEN source_url LIKE '%harlemschools%'        THEN 'https://www.harlemschools.org/district/departments/business/bid-notices'
+        WHEN source_url LIKE '%machesneypark%'        THEN 'https://www.machesneypark.org/government/purchasing'
+        WHEN source_url LIKE '%rwrd.org%'             THEN 'https://www.rwrd.org/procurement'
+        WHEN source_url LIKE '%cherryvalleyil%'       THEN 'https://www.cherryvalleyil.org/permits'
+        WHEN source_url LIKE '%lovespark%'            THEN 'https://www.lovespark.us/public-works/bids'
+        WHEN source_url LIKE '%villageofroscoe%'      THEN 'https://www.villageofroscoe.com/bids'
+        ELSE source_url
+      END
+      WHERE source_url IS NOT NULL;
+    `);
+
     console.log('✅  Database schema ready');
   } catch (err) {
     console.error('❌  Database init failed:', err.message);

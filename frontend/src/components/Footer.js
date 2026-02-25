@@ -4,7 +4,7 @@ export default function Footer() {
     <footer className="footer">
       <div className="container">
         <p>
-          © {new Date().getFullYear()} WinCo Leads — Winnebago County, IL Construction Lead Aggregator.
+          © {new Date().getFullYear()} BidFront — Winnebago County, IL Construction Lead Aggregator.
           {' '}Data sourced from public government bid portals.
         </p>
         <p style={{ marginTop: 8 }}>

@@ -38,7 +38,7 @@ export default function LoginPage() {
               <path d="M8 22L13 12L18 19L21 15L24 22H8Z" fill="#90cdf4" opacity="0.9"/>
               <circle cx="21" cy="11" r="3" fill="#3b82f6"/>
             </svg>
-            <span className="auth-brand-name">WinCo<strong>Leads</strong></span>
+            <span className="auth-brand-name">Bid<strong>Front</strong></span>
           </Link>
         </div>
 
@@ -63,7 +63,10 @@ export default function LoginPage() {
           </div>
 
           <div className="field-group">
-            <label htmlFor="password">Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label htmlFor="password">Password</label>
+              <Link to="/forgot-password" className="auth-forgot">Forgot password?</Link>
+            </div>
             <input
               id="password"
               name="password"

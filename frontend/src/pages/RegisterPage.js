@@ -36,7 +36,7 @@ export default function RegisterPage() {
               <path d="M8 22L13 12L18 19L21 15L24 22H8Z" fill="#90cdf4" opacity="0.9"/>
               <circle cx="21" cy="11" r="3" fill="#3b82f6"/>
             </svg>
-            <span className="auth-brand-name">WinCo<strong>Leads</strong></span>
+            <span className="auth-brand-name">Bid<strong>Front</strong></span>
           </Link>
         </div>
 

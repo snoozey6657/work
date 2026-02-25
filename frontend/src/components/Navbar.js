@@ -15,7 +15,7 @@ export default function Navbar() {
             <path d="M7 26L13 13L19 21L23 16L27 26H7Z" fill="#90cdf4" opacity="0.95"/>
             <circle cx="23" cy="11" r="3.5" fill="#3b82f6"/>
           </svg>
-          <span className="topnav__brand-text">WinCo<strong>Leads</strong></span>
+          <span className="topnav__brand-text">Bid<strong>Front</strong></span>
         </Link>
 
         {/* Center nav */}
