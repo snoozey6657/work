@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 
 export default function FilterBar() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { getAuthHeaders } = useAuth();
 
   const [filters, setFilters] = useState({
     search:          searchParams.get('search')          || '',
