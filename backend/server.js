@@ -5,33 +5,53 @@ const cors    = require('cors');
 const path    = require('path');
 
 const projectsRouter = require('./routes/projects');
+const authRouter     = require('./routes/auth');
+const usersRouter    = require('./routes/users');
+const pool           = require('./db/pool');
 const initDb         = require('./db/init');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
-// ── Middleware ────────────────────────────────────────────────
-app.use(cors());                        // Allow requests from React frontend / scraper
-app.use(express.json({ limit: '10mb' })); // Parse JSON bodies (for /api/import)
+// ── Middleware ─────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
-// ── API Routes ───────────────────────────────────────────────
-app.use('/api/projects', projectsRouter);
+// ── Public API Routes ──────────────────────────────────────────────────────
+app.use('/api/auth', authRouter);
 
-// Health check
+// Public meta/filters endpoint (used by HomePage before login)
+app.get('/api/meta/filters', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        array_agg(DISTINCT trade_category ORDER BY trade_category) AS trade_categories,
+        array_agg(DISTINCT location       ORDER BY location)       AS locations,
+        array_agg(DISTINCT type           ORDER BY type)           AS types
+      FROM projects WHERE status != 'deleted'
+    `);
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Health check (public)
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-// ── Serve React frontend in production ───────────────────────
-// In development the CRA dev server handles the frontend.
-// In production (Railway), we serve the built static files.
+// ── Protected API Routes ───────────────────────────────────────────────────
+app.use('/api/projects', projectsRouter); // auth enforced inside router
+app.use('/api/users',    usersRouter);    // auth enforced inside router
+
+// ── Serve React frontend in production ────────────────────────────────────
 const buildPath = path.join(__dirname, '../frontend/build');
 app.use(express.static(buildPath));
 
-// All non-API routes fall through to the React app (client-side routing)
 app.get('*', (req, res) => {
   res.sendFile(path.join(buildPath, 'index.html'));
 });
 
-// ── Start ─────────────────────────────────────────────────────
+// ── Start ──────────────────────────────────────────────────────────────────
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀  API server running at http://localhost:${PORT}`);

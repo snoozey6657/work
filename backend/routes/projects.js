@@ -1,9 +1,13 @@
 // routes/projects.js
 // All project-related API endpoints
-const express = require('express');
-const router  = express.Router();
-const pool    = require('../db/pool');
-const { Parser } = require('json2csv');
+const express        = require('express');
+const router         = express.Router();
+const pool           = require('../db/pool');
+const { Parser }     = require('json2csv');
+const authMiddleware = require('../middleware/auth');
+
+// All project routes require authentication
+router.use(authMiddleware);
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper: Build WHERE clause from query params

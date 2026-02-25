@@ -51,6 +51,42 @@ async function initDb() {
       console.log('🌱  Database seeded with 12 sample projects');
     }
 
+    // Users table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id            SERIAL PRIMARY KEY,
+        name          TEXT NOT NULL,
+        email         TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at    TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+    `);
+
+    // User-lead pipeline tracking
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_leads (
+        id         SERIAL PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        status     TEXT NOT NULL DEFAULT 'saved',
+        saved_at   TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(user_id, project_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_leads_user_id    ON user_leads(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_leads_project_id ON user_leads(project_id);
+    `);
+
+    // Alert preferences (one row per user)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_alert_preferences (
+        id               SERIAL PRIMARY KEY,
+        user_id          INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        trade_categories TEXT[] NOT NULL DEFAULT '{}',
+        locations        TEXT[] NOT NULL DEFAULT '{}'
+      );
+    `);
+
     console.log('✅  Database schema ready');
   } catch (err) {
     console.error('❌  Database init failed:', err.message);
