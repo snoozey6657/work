@@ -1,0 +1,14 @@
+{
+  "name": "winco-leads",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Winnebago County contractor lead aggregator",
+  "scripts": {
+    "build": "cd frontend && npm ci && npm run build",
+    "start": "node backend/server.js",
+    "install-all": "cd frontend && npm install && cd ../backend && npm install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Environment variables - never commit these
+.env
+backend/.env
+
+# React production build (Railway builds this fresh each deploy)
+frontend/build/
+
+# Python
+__pycache__/
+*.pyc
+scraper/__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code local settings
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
