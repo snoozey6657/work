@@ -5,6 +5,7 @@ const cors    = require('cors');
 const path    = require('path');
 
 const projectsRouter = require('./routes/projects');
+const initDb         = require('./db/init');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -31,6 +32,8 @@ app.get('*', (req, res) => {
 });
 
 // ── Start ─────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀  API server running at http://localhost:${PORT}`);
+initDb().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀  API server running at http://localhost:${PORT}`);
+  });
 });
