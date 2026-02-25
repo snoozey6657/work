@@ -4,7 +4,7 @@
   "private": true,
   "description": "Winnebago County contractor lead aggregator",
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
+    "build": "cd frontend && npm install && CI=false GENERATE_SOURCEMAP=false npm run build",
     "start": "node backend/server.js",
     "install-all": "cd frontend && npm install && cd ../backend && npm install"
   },
