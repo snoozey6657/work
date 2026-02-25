@@ -2,24 +2,18 @@
 """
 scraper/scrape_winnebago.py
 ────────────────────────────────────────────────────────────────────────────
-Scraper for Winnebago County and City of Rockford public bid pages.
-Extracts project data and imports it into the lead aggregator API.
+Real scrapers for:
+  1. Winnebago County open bids  → wincoil.gov
+  2. City of Rockford open bids  → rockfordil.gov/Bids.aspx
 
-INSTALL DEPENDENCIES:
+INSTALL:
   pip install requests beautifulsoup4
 
-RUN:
+RUN (live mode):
   python scrape_winnebago.py
 
-HOW IT WORKS:
-  1. Fetches HTML from government bid listing pages
-  2. Parses project info using BeautifulSoup
-  3. POSTs extracted data to the local API (/api/import)
-
-NOTE: Government websites change their HTML frequently.
-You'll need to inspect the target site and adjust the CSS selectors below.
-This script includes example selectors AND a mock/demo mode so you can
-test the import pipeline without a live site.
+RUN against Railway instead of localhost:
+  API_BASE=https://your-app.up.railway.app/api python scrape_winnebago.py
 ────────────────────────────────────────────────────────────────────────────
 """
 
@@ -29,80 +23,49 @@ import json
 from datetime import datetime, date
 import re
 import time
+import os
+import urllib3
 
-# ── Config ──────────────────────────────────────────────────────────────
-API_BASE    = "http://localhost:4000/api"
-DEMO_MODE   = True   # Set to False to scrape real sites
+# Suppress SSL warnings — wincoil.gov has a self-signed cert issue
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Target pages (add more as needed)
-SOURCES = [
-    {
-        "name":     "Winnebago County Purchasing",
-        "url":      "https://www.wincoil.us/purchasing/bids",
-        "type":     "Bid",
-        "location": "Rockford, IL",
-    },
-    {
-        "name":     "City of Rockford Bids",
-        "url":      "https://www.rockfordil.gov/bids",
-        "type":     "Bid",
-        "location": "Rockford, IL",
-    },
-]
+# ── Config ───────────────────────────────────────────────────────────────
+DEMO_MODE = False   # True = use fake test data, False = scrape live sites
+
+# Override with env var to point at Railway: API_BASE=https://work.up.railway.app/api
+API_BASE = os.environ.get("API_BASE", "http://localhost:4000/api")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; LeadAggregatorBot/1.0; +https://wincoleads.com)"
+    "User-Agent": "Mozilla/5.0 (compatible; WinCoLeadsBot/1.0)"
 }
 
-# ── Trade keyword mapping ─────────────────────────────────────────────────
-# Maps keywords in project titles to trade categories
+# ── Trade keyword map ─────────────────────────────────────────────────────
 TRADE_MAP = [
-    (["hvac", "heat", "cooling", "boiler", "mechanical"], "HVAC"),
-    (["electric", "lighting", "panel", "wiring", "ev charger"], "Electrical"),
-    (["plumb", "water main", "sewer", "pump", "pipe"], "Plumbing"),
-    (["roof", "membrane", "tpo", "shingle"], "Roofing"),
-    (["pav", "asphalt", "road", "street", "resurface"], "Paving"),
-    (["concrete", "sidewalk", "curb", "flatwork"], "Concrete"),
-    (["paint", "coating", "blast"], "Painting"),
-    (["floor", "hardwood", "carpet", "tile"], "Flooring"),
-    (["mason", "tuckpoint", "brick", "block"], "Masonry"),
-    (["demo", "abate", "remov"], "Demo/Abatement"),
-    (["it ", "network", "server", "software"], "IT/Technology"),
-    (["landscape", "mow", "tree"], "Landscaping"),
+    (["hvac", "heat", "cooling", "boiler", "mechanical", "ventilat", "air"],    "HVAC"),
+    (["electric", "lighting", "panel", "wiring", "ev charger", "power"],         "Electrical"),
+    (["plumb", "water main", "sewer", "pump", "pipe", "drain", "well"],          "Plumbing"),
+    (["roof", "membrane", "tpo", "shingle", "reroof"],                           "Roofing"),
+    (["pav", "asphalt", "road", "street", "resurface", "milling"],               "Paving"),
+    (["concrete", "sidewalk", "curb", "flatwork", "ada"],                        "Concrete"),
+    (["paint", "coating", "blast", "seal", "wash"],                              "Painting"),
+    (["floor", "hardwood", "carpet", "tile"],                                    "Flooring"),
+    (["mason", "tuckpoint", "brick", "block", "precast"],                        "Masonry"),
+    (["demo", "abate", "remov", "tear"],                                         "Demo/Abatement"),
+    (["it ", "network", "server", "software", "computer", "x-ray", "security"], "IT/Technology"),
+    (["landscape", "mow", "tree"],                                               "Landscaping"),
 ]
 
 def detect_trade(title: str) -> str:
-    """Guess trade category from title keywords."""
-    title_lower = title.lower()
+    t = title.lower()
     for keywords, category in TRADE_MAP:
-        if any(k in title_lower for k in keywords):
+        if any(k in t for k in keywords):
             return category
     return "General Construction"
 
-
-def parse_value(text: str) -> float | None:
-    """Extract a dollar value from strings like '$450,000' or 'Est. $1.2M'."""
-    if not text:
-        return None
-    text = text.replace(',', '').replace('$', '')
-    # Handle shorthand like "1.2M" or "450K"
-    m = re.search(r'(\d+(?:\.\d+)?)\s*([MmKk]?)', text)
-    if not m:
-        return None
-    num = float(m.group(1))
-    suffix = m.group(2).upper()
-    if suffix == 'M':
-        num *= 1_000_000
-    elif suffix == 'K':
-        num *= 1_000
-    return round(num, 2)
-
-
 def parse_date(text: str) -> str | None:
-    """Try to parse various date formats, return ISO string or None."""
     if not text:
         return None
-    text = text.strip()
+    text = re.sub(r'\s+\d{1,2}:\d{2}\s*(AM|PM)?', '', text.strip(), flags=re.I).strip()
     for fmt in ("%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%Y-%m-%d", "%m/%d/%y"):
         try:
             return datetime.strptime(text, fmt).date().isoformat()
@@ -110,121 +73,189 @@ def parse_date(text: str) -> str | None:
             continue
     return None
 
+def determine_type(text: str) -> str:
+    t = text.upper()
+    if any(x in t for x in ['RFP', 'PROPOSAL']):
+        return 'RFP'
+    if any(x in t for x in ['RFQ', 'QUALIFICATION', 'QUOTE']):
+        return 'RFP'
+    if 'PERMIT' in t:
+        return 'Permit'
+    return 'Bid'
 
-# ── Real scraper function ─────────────────────────────────────────────────
-def scrape_source(source: dict) -> list[dict]:
-    """
-    Fetch and parse a single bid listing page.
-    ⚠️  Selectors below are EXAMPLES — you must inspect the real site and adjust.
-    """
+
+# ── Winnebago County Scraper ──────────────────────────────────────────────
+# Source: wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps
+# Structure: Joomla CMS, bids listed as <ul> links to PDFs
+# Bid number format: 26B-2464, 25P-2450, 25Q-2445
+#   B = Bid, P = Proposal/RFP, Q = Quote/RFQ
+def scrape_winnebago_county() -> list[dict]:
+    url = 'https://wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps'
+    print(f"  Fetching {url}...")
     try:
-        print(f"  Fetching {source['url']}...")
-        resp = requests.get(source["url"], headers=HEADERS, timeout=15)
+        resp = requests.get(url, headers=HEADERS, timeout=20, verify=False)
         resp.raise_for_status()
     except Exception as e:
-        print(f"  ✗ Failed to fetch {source['url']}: {e}")
+        print(f"  ✗ Failed: {e}")
         return []
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.text, 'html.parser')
+
+    # Try to find the main article content area (Joomla standard)
+    content = (
+        soup.find('div', class_='item-page') or
+        soup.find('div', class_='article-content') or
+        soup.find('div', id=re.compile(r'content', re.I)) or
+        soup.find('main') or
+        soup.find('article') or
+        soup.body
+    )
+
     projects = []
+    seen_urls = set()
 
-    # ── ADJUST THESE SELECTORS to match the real page structure ──────────
-    # Example: table rows in a bid listing table
-    rows = soup.select("table.bids-table tbody tr")
+    for link in (content or soup).find_all('a', href=True):
+        text = link.get_text(strip=True)
+        href = link['href']
 
-    if not rows:
-        # Fallback: try common div-based listing patterns
-        rows = soup.select(".bid-item, .project-listing, article.bid")
-
-    for row in rows:
-        try:
-            # These selectors are illustrative — inspect the real HTML
-            title_el    = row.select_one(".bid-title, td:nth-child(1), h3")
-            date_el     = row.select_one(".bid-date, .filing-date, td:nth-child(2)")
-            deadline_el = row.select_one(".bid-deadline, .due-date, td:nth-child(3)")
-            value_el    = row.select_one(".bid-value, .estimate, td:nth-child(4)")
-            contact_el  = row.select_one(".bid-contact, .contact-name")
-            email_el    = row.select_one("a[href^='mailto:']")
-            link_el     = row.select_one("a[href]")
-
-            if not title_el:
-                continue
-
-            title = title_el.get_text(strip=True)
-            if len(title) < 5:
-                continue
-
-            project = {
-                "title":           title,
-                "type":            source.get("type", "Bid"),
-                "trade_category":  detect_trade(title),
-                "location":        source.get("location", "Winnebago County, IL"),
-                "filing_date":     parse_date(date_el.get_text() if date_el else ""),
-                "deadline":        parse_date(deadline_el.get_text() if deadline_el else ""),
-                "estimated_value": parse_value(value_el.get_text() if value_el else ""),
-                "contact_name":    contact_el.get_text(strip=True) if contact_el else None,
-                "contact_email":   email_el["href"].replace("mailto:", "") if email_el else None,
-                "contact_phone":   None,
-                "source_url":      link_el["href"] if link_el and link_el.get("href") else source["url"],
-                "description":     f"Sourced from {source['name']}. {title}",
-            }
-            projects.append(project)
-        except Exception as e:
-            print(f"    Skipped row due to error: {e}")
+        # Match bid number pattern at start: 26B-2464 or 26B-2464 - TITLE
+        bid_match = re.match(r'^(\d+[A-Z]+-\d+)\s*[-–]?\s*(.*)$', text, re.IGNORECASE)
+        if not bid_match or len(text) < 8:
             continue
 
-    print(f"  ✓ Found {len(projects)} projects from {source['name']}")
+        bid_num   = bid_match.group(1).strip()
+        title_str = bid_match.group(2).strip() or bid_num
+
+        # Build absolute URL
+        if href.startswith('/'):
+            source_url = f'https://wincoil.gov{href}'
+        elif href.startswith('http'):
+            source_url = href
+        else:
+            source_url = f'https://wincoil.gov/{href}'
+
+        if source_url in seen_urls:
+            continue
+        seen_urls.add(source_url)
+
+        full_title = f'{bid_num} - {title_str}'
+
+        projects.append({
+            'title':           full_title,
+            'type':            determine_type(bid_num + ' ' + title_str),
+            'trade_category':  detect_trade(title_str),
+            'location':        'Winnebago County, IL',
+            'filing_date':     None,
+            'deadline':        None,
+            'estimated_value': None,
+            'contact_name':    'Winnebago County Purchasing',
+            'contact_email':   'purchasing@wincoil.gov',
+            'contact_phone':   '815-319-4215',
+            'source_url':      source_url,
+            'description':     f'Winnebago County Bid #{bid_num}. See attached PDF for full specifications.',
+        })
+
+    print(f"  ✓ Found {len(projects)} bids from Winnebago County")
     return projects
 
 
-# ── Demo / test data ──────────────────────────────────────────────────────
+# ── City of Rockford Scraper ──────────────────────────────────────────────
+# Source: rockfordil.gov/Bids.aspx  (CivicEngage ASP.NET platform)
+# Structure: bid titles are <a href="bids.aspx?bidID=NNN"> links
+#   Each bid container has span.BidDetail elements with closing date & bid number
+def scrape_rockford() -> list[dict]:
+    url = 'https://rockfordil.gov/Bids.aspx'
+    print(f"  Fetching {url}...")
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"  ✗ Failed: {e}")
+        return []
+
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    projects = []
+
+    # Find all bid title links (CivicEngage format)
+    bid_links = soup.find_all('a', href=re.compile(r'[Bb]ids\.aspx\?[Bb]id[Ii][Dd]=', re.I))
+
+    for link in bid_links:
+        title = link.get_text(strip=True)
+        if not title or len(title) < 4:
+            continue
+
+        href = link.get('href', '')
+        source_url = (
+            href if href.startswith('http')
+            else f'https://rockfordil.gov/{href.lstrip("/")}'
+        )
+
+        # Climb up to the nearest block container to find details
+        container = link.find_parent(['div', 'tr', 'li', 'section'])
+        all_text  = container.get_text(' ', strip=True) if container else ''
+
+        # Extract closing/deadline date (M/D/YYYY format on this site)
+        deadline   = None
+        dates_found = re.findall(r'\b(\d{1,2}/\d{1,2}/\d{4})\b', all_text)
+        if dates_found:
+            deadline = parse_date(dates_found[0])
+
+        # Extract bid number (e.g. 226-CD-020, 1125-HS-124)
+        bid_number = ''
+        num_match  = re.search(
+            r'(?:RFP|RFQ|BID|IFB|NO\.?\s*)?(\d{2,4}-[A-Z]{1,3}-\d{2,4})',
+            all_text, re.I
+        )
+        if num_match:
+            bid_number = num_match.group(0).strip()
+
+        projects.append({
+            'title':           title,
+            'type':            determine_type(title + ' ' + bid_number),
+            'trade_category':  detect_trade(title),
+            'location':        'Rockford, IL',
+            'filing_date':     None,
+            'deadline':        deadline,
+            'estimated_value': None,
+            'contact_name':    'City of Rockford Purchasing',
+            'contact_email':   'purchasing2@rockfordil.gov',
+            'contact_phone':   '779-348-7000',
+            'source_url':      source_url,
+            'description':     (f'{bid_number} — ' if bid_number else '') + title,
+        })
+
+    print(f"  ✓ Found {len(projects)} bids from City of Rockford")
+    return projects
+
+
+# ── Demo data ─────────────────────────────────────────────────────────────
 def get_demo_projects() -> list[dict]:
-    """
-    Returns fake scraped data to test the import pipeline.
-    Useful when you don't have internet access or want to test the DB import.
-    """
     today = date.today().isoformat()
     return [
         {
-            "title": "Scraper Test: Boiler Replacement - North Fire Station",
-            "type": "Bid",
-            "trade_category": "HVAC",
-            "location": "Rockford, IL",
-            "filing_date": today,
-            "deadline": "2025-04-30",
+            "title":           "Scraper Test: Boiler Replacement - North Fire Station",
+            "type":            "Bid",
+            "trade_category":  "HVAC",
+            "location":        "Rockford, IL",
+            "filing_date":     today,
+            "deadline":        "2026-04-30",
             "estimated_value": 88000.00,
-            "contact_name": "Demo Contact",
-            "contact_email": "demo@rockfordil.gov",
-            "contact_phone": "815-555-0100",
-            "source_url": f"https://www.rockfordil.gov/bids/demo-boiler-{today}",
-            "description": "Test import from scraper. Boiler replacement at North Fire Station. Two-stage natural gas boiler, 400 MBH input."
-        },
-        {
-            "title": "Scraper Test: Parking Lot Resurfacing - County Admin Building",
-            "type": "Bid",
-            "trade_category": "Paving",
-            "location": "Rockford, IL",
-            "filing_date": today,
-            "deadline": "2025-05-15",
-            "estimated_value": 62000.00,
-            "contact_name": "Demo Paving Contact",
-            "contact_email": "paving@wincoil.us",
-            "contact_phone": "815-319-4200",
-            "source_url": f"https://www.wincoil.us/bids/paving-demo-{today}",
-            "description": "Test import. Parking lot mill and overlay at County Admin Building. Approx 18,000 sq ft."
+            "contact_name":    "Demo Contact",
+            "contact_email":   "demo@rockfordil.gov",
+            "contact_phone":   "815-555-0100",
+            "source_url":      f"https://www.rockfordil.gov/bids/demo-boiler-{today}",
+            "description":     "Test import. Boiler replacement at North Fire Station.",
         }
     ]
 
 
 # ── Import to API ─────────────────────────────────────────────────────────
 def import_to_api(projects: list[dict]) -> None:
-    """POST the project list to the local API."""
     if not projects:
         print("No projects to import.")
         return
-
     try:
-        print(f"\nImporting {len(projects)} projects to API...")
+        print(f"\nImporting {len(projects)} projects to {API_BASE}...")
         resp = requests.post(
             f"{API_BASE}/projects/import",
             json=projects,
@@ -233,42 +264,45 @@ def import_to_api(projects: list[dict]) -> None:
         )
         resp.raise_for_status()
         result = resp.json()
-        print(f"✅  Import complete: {result.get('inserted', 0)} inserted, {result.get('updated', 0)} updated")
+        print(f"✅  Import complete: {result.get('inserted', 0)} inserted, "
+              f"{result.get('updated', 0)} updated")
     except Exception as e:
         print(f"❌  Import failed: {e}")
         if hasattr(e, 'response') and e.response is not None:
-            print("   API response:", e.response.text[:500])
+            print("   Response:", e.response.text[:500])
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
 def main():
     print("=" * 60)
     print("WinCo Leads Scraper")
-    print(f"Mode: {'DEMO' if DEMO_MODE else 'LIVE'}")
+    print(f"Mode : {'DEMO' if DEMO_MODE else 'LIVE'}")
+    print(f"API  : {API_BASE}")
     print("=" * 60)
 
     all_projects = []
 
     if DEMO_MODE:
-        print("\n[DEMO MODE] Using test data instead of live scraping.")
+        print("\n[DEMO MODE] Using test data.")
         all_projects = get_demo_projects()
     else:
-        for source in SOURCES:
-            print(f"\nScraping: {source['name']}")
-            projects = scrape_source(source)
-            all_projects.extend(projects)
-            time.sleep(2)  # Be polite — don't hammer servers
+        print("\nScraping Winnebago County...")
+        all_projects.extend(scrape_winnebago_county())
+        time.sleep(2)   # Be polite — don't hammer servers
 
-    print(f"\nTotal projects collected: {len(all_projects)}")
+        print("\nScraping City of Rockford...")
+        all_projects.extend(scrape_rockford())
+
+    print(f"\nTotal collected: {len(all_projects)}")
 
     if all_projects:
-        # Save a local JSON backup before importing
-        backup_file = f"scraped_{date.today().isoformat()}.json"
-        with open(backup_file, "w") as f:
-            json.dump(all_projects, f, indent=2)
-        print(f"Saved backup to: {backup_file}")
-
+        backup = f"scraped_{date.today().isoformat()}.json"
+        with open(backup, "w") as f:
+            json.dump(all_projects, f, indent=2, default=str)
+        print(f"Saved backup : {backup}")
         import_to_api(all_projects)
+    else:
+        print("Nothing to import.")
 
 
 if __name__ == "__main__":
