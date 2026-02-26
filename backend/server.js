@@ -4,11 +4,13 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 
-const projectsRouter = require('./routes/projects');
-const authRouter     = require('./routes/auth');
-const usersRouter    = require('./routes/users');
-const pool           = require('./db/pool');
-const initDb         = require('./db/init');
+const projectsRouter             = require('./routes/projects');
+const authRouter                 = require('./routes/auth');
+const usersRouter                = require('./routes/users');
+const pool                       = require('./db/pool');
+const initDb                     = require('./db/init');
+const { startScheduler }         = require('./jobs/scheduler');
+const { runScraper, closeExpiredBids } = require('./scraper');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -28,7 +30,7 @@ app.get('/api/meta/filters', async (req, res) => {
         array_agg(DISTINCT trade_category ORDER BY trade_category) AS trade_categories,
         array_agg(DISTINCT location       ORDER BY location)       AS locations,
         array_agg(DISTINCT type           ORDER BY type)           AS types
-      FROM projects WHERE status != 'deleted'
+      FROM projects WHERE status = 'active'
     `);
     res.json(rows[0]);
   } catch (err) {
@@ -37,7 +39,22 @@ app.get('/api/meta/filters', async (req, res) => {
 });
 
 // Health check (public)
-app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// Manual scrape trigger — protected by SCRAPER_SECRET env var
+app.post('/api/admin/scrape', async (req, res) => {
+  const secret = process.env.SCRAPER_SECRET;
+  if (secret && req.headers['x-scraper-secret'] !== secret) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    res.json({ message: 'Scrape started' });   // respond immediately
+    await closeExpiredBids();
+    await runScraper();
+  } catch (err) {
+    console.error('Manual scrape error:', err.message);
+  }
+});
 
 // ── Protected API Routes ───────────────────────────────────────────────────
 app.use('/api/projects', projectsRouter); // auth enforced inside router
@@ -55,5 +72,6 @@ app.get('*', (req, res) => {
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`🚀  API server running at http://localhost:${PORT}`);
+    startScheduler();
   });
 });

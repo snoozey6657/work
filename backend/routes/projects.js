@@ -6,15 +6,16 @@ const pool           = require('../db/pool');
 const { Parser }     = require('json2csv');
 const authMiddleware = require('../middleware/auth');
 
-// All project routes require authentication
-router.use(authMiddleware);
+// Import endpoint is public (called by scraper — no user token)
+// All other project routes require authentication (applied per-route below)
+// We apply authMiddleware after registering /import
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper: Build WHERE clause from query params
 // Returns { whereClause, values } for parameterized queries
 // ─────────────────────────────────────────────────────────────────────
 function buildFilters(query) {
-  const conditions = ["status != 'deleted'"];
+  const conditions = ["status = 'active'"];
   const values = [];
   let idx = 1;
 
@@ -49,6 +50,77 @@ function buildFilters(query) {
     values,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// POST /api/projects/import  (PUBLIC — called by scraper, no user token)
+// Accepts array of project objects and upserts them
+// Body: [{ title, type, trade_category, location, ... source_url }, ...]
+// ─────────────────────────────────────────────────────────────────────
+router.post('/import', async (req, res) => {
+  const projects = req.body;
+
+  if (!Array.isArray(projects) || projects.length === 0) {
+    return res.status(400).json({ error: 'Body must be a non-empty array of projects' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let inserted = 0;
+    let updated  = 0;
+
+    for (const p of projects) {
+      if (!p.source_url) continue;
+      const existing = await client.query(
+        'SELECT id FROM projects WHERE source_url = $1',
+        [p.source_url]
+      );
+
+      if (existing.rows.length > 0) {
+        await client.query(
+          `UPDATE projects SET
+             title = $1, type = $2, trade_category = $3, location = $4,
+             filing_date = $5, deadline = $6, estimated_value = $7,
+             contact_name = $8, contact_email = $9, contact_phone = $10,
+             description = $11, status = 'active', updated_at = NOW()
+           WHERE source_url = $12`,
+          [p.title, p.type, p.trade_category, p.location,
+           p.filing_date || null, p.deadline || null, p.estimated_value || null,
+           p.contact_name, p.contact_email, p.contact_phone,
+           p.description, p.source_url]
+        );
+        updated++;
+      } else {
+        await client.query(
+          `INSERT INTO projects
+             (title, type, trade_category, location, filing_date, deadline,
+              estimated_value, contact_name, contact_email, contact_phone,
+              source_url, description, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'active')`,
+          [p.title, p.type, p.trade_category, p.location,
+           p.filing_date || null, p.deadline || null, p.estimated_value || null,
+           p.contact_name, p.contact_email, p.contact_phone,
+           p.source_url, p.description]
+        );
+        inserted++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, inserted, updated });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('POST /api/projects/import error:', err);
+    res.status(500).json({ error: 'Import failed', detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// All routes below this line require authentication
+// ─────────────────────────────────────────────────────────────────────
+router.use(authMiddleware);
 
 // ─────────────────────────────────────────────────────────────────────
 // GET /api/projects
@@ -166,9 +238,9 @@ router.get('/:id', async (req, res) => {
 router.get('/meta/filters', async (req, res) => {
   try {
     const [cats, locs, types] = await Promise.all([
-      pool.query("SELECT DISTINCT trade_category FROM projects WHERE status != 'deleted' ORDER BY trade_category"),
-      pool.query("SELECT DISTINCT location FROM projects WHERE status != 'deleted' ORDER BY location"),
-      pool.query("SELECT DISTINCT type FROM projects WHERE status != 'deleted' ORDER BY type"),
+      pool.query("SELECT DISTINCT trade_category FROM projects WHERE status = 'active' ORDER BY trade_category"),
+      pool.query("SELECT DISTINCT location FROM projects WHERE status = 'active' ORDER BY location"),
+      pool.query("SELECT DISTINCT type FROM projects WHERE status = 'active' ORDER BY type"),
     ]);
     res.json({
       trade_categories: cats.rows.map(r => r.trade_category),
@@ -177,73 +249,6 @@ router.get('/meta/filters', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────
-// POST /api/import
-// Accepts array of project objects (from scraper) and upserts them
-// Body: [{ title, type, trade_category, location, ... source_url }, ...]
-// ─────────────────────────────────────────────────────────────────────
-router.post('/import', async (req, res) => {
-  const projects = req.body;
-
-  if (!Array.isArray(projects) || projects.length === 0) {
-    return res.status(400).json({ error: 'Body must be a non-empty array of projects' });
-  }
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    let inserted = 0;
-    let skipped  = 0;
-
-    for (const p of projects) {
-      // Use source_url as unique key — if it already exists, update; else insert
-      const existing = await client.query(
-        'SELECT id FROM projects WHERE source_url = $1',
-        [p.source_url]
-      );
-
-      if (existing.rows.length > 0) {
-        // Update existing record
-        await client.query(
-          `UPDATE projects SET
-             title = $1, type = $2, trade_category = $3, location = $4,
-             filing_date = $5, deadline = $6, estimated_value = $7,
-             contact_name = $8, contact_email = $9, contact_phone = $10,
-             description = $11, updated_at = NOW()
-           WHERE source_url = $12`,
-          [p.title, p.type, p.trade_category, p.location,
-           p.filing_date, p.deadline, p.estimated_value,
-           p.contact_name, p.contact_email, p.contact_phone,
-           p.description, p.source_url]
-        );
-        skipped++;
-      } else {
-        await client.query(
-          `INSERT INTO projects
-             (title, type, trade_category, location, filing_date, deadline,
-              estimated_value, contact_name, contact_email, contact_phone,
-              source_url, description)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-          [p.title, p.type, p.trade_category, p.location,
-           p.filing_date, p.deadline, p.estimated_value,
-           p.contact_name, p.contact_email, p.contact_phone,
-           p.source_url, p.description]
-        );
-        inserted++;
-      }
-    }
-
-    await client.query('COMMIT');
-    res.json({ success: true, inserted, updated: skipped });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('POST /api/import error:', err);
-    res.status(500).json({ error: 'Import failed', detail: err.message });
-  } finally {
-    client.release();
   }
 });
 
