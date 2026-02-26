@@ -3,7 +3,7 @@
 scraper/scrape_winnebago.py
 ────────────────────────────────────────────────────────────────────────────
 Real scrapers for:
-  1. Winnebago County open bids  → wincoil.gov
+  1. Winnebago County open bids  → wincoil.us (Government/Purchasing-Department)
   2. City of Rockford open bids  → rockfordil.gov/Bids.aspx
 
 INSTALL:
@@ -26,7 +26,7 @@ import time
 import os
 import urllib3
 
-# Suppress SSL warnings — wincoil.gov has a self-signed cert issue
+# Suppress SSL warnings — some county sites have SSL cert issues
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Config ───────────────────────────────────────────────────────────────
@@ -85,12 +85,15 @@ def determine_type(text: str) -> str:
 
 
 # ── Winnebago County Scraper ──────────────────────────────────────────────
-# Source: wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps
+# Source: wincoil.us/Government/Purchasing-Department/Open-Bids-Quotes-RFPs/
 # Structure: Joomla CMS, bids listed as <ul> links to PDFs
 # Bid number format: 26B-2464, 25P-2450, 25Q-2445
 #   B = Bid, P = Proposal/RFP, Q = Quote/RFQ
+WINCO_BASE = 'https://www.wincoil.us'
+WINCO_BIDS_URL = f'{WINCO_BASE}/Government/Purchasing-Department/Open-Bids-Quotes-RFPs/'
+
 def scrape_winnebago_county() -> list[dict]:
-    url = 'https://wincoil.gov/departments/purchasing-department/open-bids-quotes-rfps'
+    url = WINCO_BIDS_URL
     print(f"  Fetching {url}...")
     try:
         resp = requests.get(url, headers=HEADERS, timeout=20, verify=False)
@@ -128,11 +131,11 @@ def scrape_winnebago_county() -> list[dict]:
 
         # Build absolute URL
         if href.startswith('/'):
-            source_url = f'https://wincoil.gov{href}'
+            source_url = f'{WINCO_BASE}{href}'
         elif href.startswith('http'):
             source_url = href
         else:
-            source_url = f'https://wincoil.gov/{href}'
+            source_url = f'{WINCO_BASE}/{href}'
 
         if source_url in seen_urls:
             continue
@@ -149,7 +152,7 @@ def scrape_winnebago_county() -> list[dict]:
             'deadline':        None,
             'estimated_value': None,
             'contact_name':    'Winnebago County Purchasing',
-            'contact_email':   'purchasing@wincoil.gov',
+            'contact_email':   'purchasing@wincoil.us',
             'contact_phone':   '815-319-4215',
             'source_url':      source_url,
             'description':     f'Winnebago County Bid #{bid_num}. See attached PDF for full specifications.',
